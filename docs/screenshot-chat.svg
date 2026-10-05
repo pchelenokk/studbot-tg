@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 720" width="480" height="720" role="img" aria-label="Скриншот бота в Telegram">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a2331"/>
+      <stop offset="1" stop-color="#0f151e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2f6fed"/>
+      <stop offset="1" stop-color="#7c5cff"/>
+    </linearGradient>
+    <linearGradient id="btn" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f6fed"/>
+      <stop offset="1" stop-color="#6d3bf5"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="480" height="720" fill="url(#bg)"/>
+  <rect width="480" height="58" fill="#151d28"/>
+  <circle cx="30" cy="29" r="15" fill="url(#accent)"/>
+  <text x="30" y="34" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">SB</text>
+  <text x="56" y="26" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#e6edf5">@isgrouphelperbot</text>
+  <text x="56" y="42" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">бот группы</text>
+
+  <rect x="20" y="76" width="440" height="82" rx="14" fill="#1e2937"/>
+  <text x="36" y="104" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#e6edf5">👋 Привет, Миша!</text>
+  <text x="36" y="122" font-family="Arial, sans-serif" font-size="11" fill="#8494a8">Твоя роль: 👑 Староста</text>
+  <rect x="36" y="132" width="404" height="20" rx="6" fill="#263243"/>
+  <text x="238" y="146" font-family="Arial, sans-serif" font-size="10" fill="#8494a8" text-anchor="middle">Выбери раздел</text>
+
+  <rect x="20" y="176" width="440" height="96" rx="14" fill="#1a2331" stroke="#2b3749"/>
+  <text x="36" y="200" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#4c8dff">📚 Библиотека — 24 книги</text>
+  <text x="36" y="220" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">📘 Высшая математика</text>
+  <text x="150" y="220" font-family="Arial, sans-serif" font-size="10" fill="#9fb0c6">📎 Методические указания</text>
+  <text x="36" y="238" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">📘 Физика</text>
+  <text x="150" y="238" font-family="Arial, sans-serif" font-size="10" fill="#9fb0c6">📎 Задачник 1 курс</text>
+  <text x="36" y="258" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">📘 Английский</text>
+  <text x="150" y="258" font-family="Arial, sans-serif" font-size="10" fill="#9fb0c6">📁 Английский для инженеров</text>
+
+  <rect x="20" y="290" width="440" height="120" rx="14" fill="#1a2331" stroke="#2b3749"/>
+  <rect x="20" y="290" width="440" height="4" rx="2" fill="url(#accent)"/>
+  <text x="36" y="320" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#4c8dff">🗳 Перекличка создана</text>
+  <text x="36" y="342" font-family="Arial, sans-serif" font-size="11" fill="#e6edf5">📘 Физика</text>
+  <text x="36" y="360" font-family="Arial, sans-serif" font-size="11" fill="#e6edf5">📅 05.10.2026</text>
+  <text x="36" y="378" font-family="Arial, sans-serif" font-size="11" fill="#e6edf5">⏳ 15 минут</text>
+
+  <rect x="36" y="390" width="120" height="30" rx="9" fill="#2fd07a"/>
+  <text x="96" y="409" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#04210f" text-anchor="middle">✅ На паре</text>
+  <rect x="166" y="390" width="130" height="30" rx="9" fill="#ff5c62"/>
+  <text x="231" y="409" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">❌ Меня нет</text>
+  <rect x="306" y="390" width="134" height="30" rx="9" fill="url(#btn)"/>
+  <text x="373" y="409" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">⏳ Опоздаю</text>
+
+  <rect x="20" y="440" width="440" height="86" rx="14" fill="#1a2331" stroke="#2b3749"/>
+  <text x="36" y="464" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffc53d">✅ Перекличка завершена</text>
+  <text x="36" y="484" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">Неделя 41 (2026), 05.10.2026</text>
+  <text x="36" y="502" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">Итоги: 21 пришли, 2 отсутствуют, 1 опоздал</text>
+  <rect x="36" y="508" width="130" height="12" rx="4" fill="#263243"/>
+  <text x="101" y="517" font-family="Arial, sans-serif" font-size="8" fill="#9fb0c6" text-anchor="middle">attendance.xlsx</text>
+
+  <rect x="20" y="548" width="440" height="72" rx="14" fill="#1a2331" stroke="#2b3749"/>
+  <text x="36" y="572" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#4c8dff">👥 Студенты и роли</text>
+  <text x="36" y="592" font-family="Arial, sans-serif" font-size="10" fill="#9fb0c6">👑 Misha_Makk — Староста</text>
+  <text x="36" y="610" font-family="Arial, sans-serif" font-size="10" fill="#9fb0c6">📋 makenagagreatagain0 — Профорг</text>
+
+  <rect x="0" y="640" width="480" height="80" fill="#121821"/>
+  <rect x="30" y="662" width="24" height="24" rx="8" fill="#263243"/>
+  <text x="42" y="679" font-family="Arial, sans-serif" font-size="12" fill="#8494a8" text-anchor="middle">📚</text>
+  <rect x="72" y="662" width="24" height="24" rx="8" fill="#263243"/>
+  <text x="84" y="679" font-family="Arial, sans-serif" font-size="12" fill="#8494a8" text-anchor="middle">📝</text>
+  <rect x="114" y="662" width="24" height="24" rx="8" fill="#263243"/>
+  <text x="126" y="679" font-family="Arial, sans-serif" font-size="12" fill="#8494a8" text-anchor="middle">🗳</text>
+  <rect x="156" y="662" width="24" height="24" rx="8" fill="#263243"/>
+  <text x="168" y="679" font-family="Arial, sans-serif" font-size="12" fill="#8494a8" text-anchor="middle">📊</text>
+
+  <text x="240" y="712" font-family="Arial, sans-serif" font-size="9" fill="#4d5f78" text-anchor="middle">studbot · скриншот будет заменён реальным</text>
+</svg>

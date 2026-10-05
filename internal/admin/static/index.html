@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StudBot — Панель управления</title>
+<link rel="stylesheet" href="/panel.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="logo">
+      <div class="logo-mark">SB</div>
+      <div>
+        <div class="logo-title">StudBot</div>
+        <div class="logo-sub">панель управления</div>
+      </div>
+    </div>
+
+    <nav id="nav">
+      <button class="nav-item active" data-view="dashboard"><span>📊</span> Обзор</button>
+      <button class="nav-item" data-view="users"><span>👥</span> Пользователи и роли</button>
+      <button class="nav-item" data-view="books"><span>📚</span> Библиотека</button>
+      <button class="nav-item" data-view="homework"><span>📝</span> Домашка</button>
+      <button class="nav-item" data-view="events"><span>📅</span> События и опросы</button>
+      <button class="nav-item" data-view="broadcast"><span>📣</span> Рассылка</button>
+      <button class="nav-item" data-view="logs"><span>📋</span> Логи</button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="dot-row"><span class="dot" id="status-dot"></span><span id="status-text">подключение…</span></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="top">
+      <div>
+        <h1 id="view-title">Обзор</h1>
+        <div class="muted" id="view-sub">состояние сервера и бота</div>
+      </div>
+      <div class="top-actions">
+        <span class="pill" id="uptime">—</span>
+        <button class="btn ghost" data-act="reload">⟳ Обновить</button>
+      </div>
+    </header>
+
+    <div id="content"></div>
+  </main>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/panel.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Бот старосты</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/style.css?v=3">
+</head>
+<body>
+<div id="app">
+    <header id="header">
+        <div class="row">
+            <div>
+                <div id="who">Загрузка…</div>
+                <div id="role" class="muted"></div>
+            </div>
+            <button id="refresh" title="Обновить">⟳</button>
+        </div>
+    </header>
+
+    <nav id="tabs"></nav>
+
+    <main>
+        <section id="view" class="view"></section>
+    </main>
+</div>
+
+<div id="sheet" class="sheet" hidden>
+    <div class="sheet-backdrop"></div>
+    <div class="sheet-body">
+        <div class="sheet-head">
+            <h3 id="sheet-title"></h3>
+            <button id="sheet-close" class="icon-btn">✕</button>
+        </div>
+        <div id="sheet-content"></div>
+    </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/app.js?v=3"></script>
+</body>
+</html>

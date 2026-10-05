@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" width="900" height="560" role="img" aria-label="Скриншот админ-панели">
+  <defs>
+    <linearGradient id="p" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4c8dff"/>
+      <stop offset="1" stop-color="#7c5cff"/>
+    </linearGradient>
+    <linearGradient id="sb" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4c8dff"/>
+      <stop offset="1" stop-color="#7c5cff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="560" fill="#0f151e"/>
+
+  <rect x="0" y="0" width="200" height="560" fill="#151d28"/>
+  <rect x="236" y="0" width="1" height="560" fill="#2b3749"/>
+
+  <rect x="18" y="20" width="36" height="36" rx="11" fill="url(#p)"/>
+  <text x="36" y="43" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">SB</text>
+  <text x="64" y="38" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#e6edf5">StudBot</text>
+  <text x="64" y="52" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">панель управления</text>
+
+  <rect x="14" y="76" width="172" height="34" rx="9" fill="url(#sb)"/>
+  <text x="30" y="98" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">📊  Обзор</text>
+
+  <text x="30" y="136" font-family="Arial, sans-serif" font-size="12" fill="#8494a8">👥  Пользователи и роли</text>
+  <text x="30" y="168" font-family="Arial, sans-serif" font-size="12" fill="#8494a8">📚  Библиотека</text>
+  <text x="30" y="200" font-family="Arial, sans-serif" font-size="12" fill="#8494a8">📝  Домашка</text>
+  <text x="30" y="232" font-family="Arial, sans-serif" font-size="12" fill="#8494a8">📅  События и опросы</text>
+  <text x="30" y="264" font-family="Arial, sans-serif" font-size="12" fill="#8494a8">📣  Рассылка</text>
+  <text x="30" y="296" font-family="Arial, sans-serif" font-size="12" fill="#8494a8">📋  Логи</text>
+
+  <line x1="14" y1="520" x2="186" y2="520" stroke="#2b3749"/>
+  <circle cx="26" cy="538" r="5" fill="#2fd07a"/>
+  <text x="40" y="542" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">бот на связи · @isgrouphelperbot</text>
+
+  <text x="236" y="34" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#e6edf5">Обзор</text>
+  <text x="236" y="52" font-family="Arial, sans-serif" font-size="11" fill="#8494a8">состояние сервера и бота</text>
+  <rect x="742" y="20" width="60" height="26" rx="13" fill="#1a2331" stroke="#2b3749"/>
+  <text x="772" y="37" font-family="Arial, sans-serif" font-size="9" fill="#8494a8" text-anchor="middle">⏱ 3ч 14м</text>
+  <rect x="810" y="20" width="74" height="26" rx="8" fill="#1a2331" stroke="#2b3749"/>
+  <text x="847" y="37" font-family="Arial, sans-serif" font-size="10" fill="#e6edf5" text-anchor="middle">⟳ Обновить</text>
+
+  <rect x="236" y="66" width="152" height="72" rx="13" fill="#1a2331" stroke="#2b3749"/>
+  <rect x="236" y="66" width="3" height="72" fill="url(#sb)"/>
+  <text x="252" y="88" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">АПТАЙМ</text>
+  <text x="252" y="112" font-family="Arial, sans-serif" font-size="21" font-weight="bold" fill="#e6edf5">3ч 14м</text>
+  <text x="252" y="128" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">Go 1.26.0</text>
+
+  <rect x="400" y="66" width="152" height="72" rx="13" fill="#1a2331" stroke="#2b3749"/>
+  <rect x="400" y="66" width="3" height="72" fill="#2fd07a"/>
+  <text x="416" y="88" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">ПОЛЬЗОВАТЕЛЕЙ</text>
+  <text x="416" y="112" font-family="Arial, sans-serif" font-size="21" font-weight="bold" fill="#e6edf5">24</text>
+  <text x="416" y="128" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">студентов: 21</text>
+
+  <rect x="564" y="66" width="152" height="72" rx="13" fill="#1a2331" stroke="#2b3749"/>
+  <rect x="564" y="66" width="3" height="72" fill="url(#sb)"/>
+  <text x="580" y="88" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">КНИГ</text>
+  <text x="580" y="112" font-family="Arial, sans-serif" font-size="21" font-weight="bold" fill="#e6edf5">18</text>
+  <text x="580" y="128" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">в библиотеке</text>
+
+  <rect x="728" y="66" width="156" height="72" rx="13" fill="#1a2331" stroke="#2b3749"/>
+  <rect x="728" y="66" width="3" height="72" fill="#ffc53d"/>
+  <text x="744" y="88" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">ПАМЯТЬ</text>
+  <text x="744" y="112" font-family="Arial, sans-serif" font-size="21" font-weight="bold" fill="#e6edf5">4.2 МБ</text>
+  <text x="744" y="128" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">goroutines: 12</text>
+
+  <rect x="236" y="152" width="648" height="150" rx="13" fill="#1a2331" stroke="#2b3749"/>
+  <text x="254" y="176" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#e6edf5">👥 Пользователи и роли</text>
+  <text x="254" y="196" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">В последней колонке роль меняется сразу, без перезапуска</text>
+
+  <rect x="254" y="210" width="612" height="24" rx="6" fill="#1e2937"/>
+  <text x="266" y="226" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">ИМЯ</text>
+  <text x="450" y="226" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">TELEGRAM ID</text>
+  <text x="560" y="226" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">РОЛЬ</text>
+  <text x="700" y="226" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">ПОСЕЩАЕМОСТЬ</text>
+
+  <line x1="254" y1="238" x2="866" y2="238" stroke="#2b3749"/>
+  <text x="266" y="256" font-family="Arial, sans-serif" font-size="10" fill="#e6edf5">Михаил Макаров</text>
+  <text x="266" y="268" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">@pchelenokk</text>
+  <rect x="450" y="246" width="72" height="18" rx="5" fill="#0f151e"/>
+  <text x="486" y="259" font-family="Arial, sans-serif" font-size="9" fill="#9ec5ff" text-anchor="middle">690210228</text>
+  <rect x="560" y="246" width="66" height="18" rx="9" fill="#ffc53d"/>
+  <text x="593" y="259" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#2b1f00" text-anchor="middle">Староста</text>
+  <text x="700" y="259" font-family="Arial, sans-serif" font-size="10" fill="#e6edf5">нет данных</text>
+
+  <line x1="254" y1="272" x2="866" y2="272" stroke="#2b3749" opacity="0.5"/>
+  <text x="266" y="292" font-family="Arial, sans-serif" font-size="10" fill="#e6edf5">makena gagarets</text>
+  <text x="266" y="304" font-family="Arial, sans-serif" font-size="9" fill="#8494a8">@makenagagreatagain0</text>
+  <rect x="450" y="282" width="86" height="18" rx="5" fill="#0f151e"/>
+  <text x="493" y="295" font-family="Arial, sans-serif" font-size="9" fill="#9ec5ff" text-anchor="middle">6675530320</text>
+  <rect x="560" y="282" width="66" height="18" rx="9" fill="#4c8dff"/>
+  <text x="593" y="295" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#fff" text-anchor="middle">Профорг</text>
+  <text x="700" y="295" font-family="Arial, sans-serif" font-size="10" fill="#e6edf5">12/12 (100%)</text>
+
+  <rect x="236" y="316" width="648" height="96" rx="13" fill="#1a2331" stroke="#2b3749"/>
+  <text x="254" y="340" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#e6edf5">⚙️ Конфигурация</text>
+  <text x="254" y="360" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">Прокси Telegram</text>
+  <rect x="360" y="350" width="150" height="18" rx="5" fill="#0f151e"/>
+  <text x="435" y="363" font-family="Arial, sans-serif" font-size="9" fill="#9ec5ff" text-anchor="middle">http://127.0.0.1:10809</text>
+  <text x="540" y="363" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">задан автоматически из Windows</text>
+  <text x="254" y="388" font-family="Arial, sans-serif" font-size="10" fill="#8494a8">Панель</text>
+  <text x="360" y="388" font-family="Arial, sans-serif" font-size="10" fill="#2fd07a">защищена паролем, только с localhost</text>
+
+  <rect x="236" y="426" width="208" height="34" rx="10" fill="url(#sb)"/>
+  <text x="340" y="448" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle">📚  Добавить книгу</text>
+  <rect x="454" y="426" width="140" height="34" rx="10" fill="#1a2331" stroke="#2b3749"/>
+  <text x="524" y="448" font-family="Arial, sans-serif" font-size="12" fill="#e6edf5" text-anchor="middle">📣  Рассылка</text>
+  <rect x="604" y="426" width="280" height="34" rx="10" fill="#ffc53d"/>
+  <text x="744" y="448" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#2b1f00" text-anchor="middle">🆕  Очистить посещаемость</text>
+
+  <rect x="0" y="470" width="200" height="90" fill="#0f151e"/>
+  <rect x="236" y="470" width="648" height="60" rx="13" fill="#0a0f16" stroke="#2b3749"/>
+  <text x="254" y="492" font-family="Arial, sans-serif" font-size="9" fill="#4d5f78">17:47</text>
+  <text x="300" y="492" font-family="Arial, sans-serif" font-size="10" fill="#9fb0c6">бот @isgrouphelperbot запущен</text>
+  <text x="254" y="512" font-family="Arial, sans-serif" font-size="9" fill="#4d5f78">17:48</text>
+  <text x="300" y="512" font-family="Arial, sans-serif" font-size="10" fill="#9fb0c6">uploaded book #8 «Физика» (lab.pdf, 1.2 МБ)</text>
+</svg>

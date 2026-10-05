@@ -1,0 +1,27 @@
+# Секреты и локальные данные
+.env
+*.env
+!.env.example
+data/
+
+# Сборка
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Логи
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+.DS_Store
+Thumbs.db
+
+# Временное
+tmp/
+*.tmp
