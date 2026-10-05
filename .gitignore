@@ -25,3 +25,9 @@ Thumbs.db
 # Временное
 tmp/
 *.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
