@@ -4,10 +4,13 @@ StudBot Manager — настольное приложение для запус�
 
 Возможности:
   * запуск, остановка и перезапуск бота
-  * живой просмотр логов
+  * живой просмотр журналов
   * состояние Telegram, туннеля и веб-сервисов
   * работа с Git: коммиты, изменения, отправка на GitHub
-  * быстрые переходы: админ-панель, мини-приложение, папка проекта
+  * быстрые переходы: админ-панель, мини-приложение, папки проекта
+
+Тяжёлые операции (проверка сети, git, сборка) выполняются в фоновом потоке,
+поэтому интерфейс никогда не подвисает.
 
 Зависимостей нет — только стандартная библиотека Python 3.10+.
 """
@@ -18,6 +21,7 @@ import os
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -30,29 +34,28 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_TITLE = "StudBot Manager"
+APP_VERSION = "1.1.0"
+
 ROOT = Path(__file__).resolve().parent
 EXE = ROOT / "studbot.exe"
-LOG_FILE = ROOT / "bot.log"
+BOT_LOG = ROOT / "bot.log"
 ENV_FILE = ROOT / ".env"
+LOG_DIR = ROOT / "data" / "logs"
+LOG_FILE = LOG_DIR / "manager.log"
 
-# Прокси для проверки доступности Telegram
 TELEGRAM_URL = "https://api.telegram.org"
 
-# Паттерны секретов. Требования намеренно строгие, чтобы плейсхолдеры
-# в README и .env.example не считались реальными секретами.
+# Паттерны секретов. Намеренно строгие, чтобы плейсхолдеры в README
+# и .env.example не считались реальными секретами.
 SECRET_PATTERNS = [
     re.compile(r"ghp_[A-Za-z0-9]{30,}"),
     re.compile(r"github_pat_[A-Za-z0-9_]{40,}"),
-    # реальный токен Telegram выглядит так: 123456789:AAH... (35+ символов)
     re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35,}\b"),
-    # реальный пароль из .env — ASCII-строка от 12 символов
     re.compile(r"^\s*ADMIN_PASSWORD\s*=\s*[A-Za-z0-9!@#$%^&*._-]{12,}\s*$", re.M),
 ]
 
-# Файлы, где секретов быть не должно в принципе
-SECRET_FREE_FILES = {".env.example", "manager.py", ".gitignore", "LICENSE"}
+SECRET_FREE_FILES = {".env.example", "manager.py", ".gitignore", "LICENSE", "manager.bat"}
 
-# Палитра
 BG = "#0f151e"
 CARD = "#1a2331"
 CARD2 = "#212c3c"
@@ -60,36 +63,38 @@ LINE = "#2b3749"
 TEXT = "#e6edf5"
 MUTED = "#8494a8"
 ACCENT = "#4c8dff"
-ACCENT2 = "#7c5cff"
 GREEN = "#2fd07a"
 RED = "#ff5c62"
 YELLOW = "#ffc53d"
 
 
-def run(cmd, cwd=None, timeout=60, env=None):
-    """Запускает команду и возвращает (код, stdout, stderr)."""
-    e = dict(os.environ)
-    if env:
-        e.update(env)
+# --------------------------------------------------------------------------- #
+#  Вспомогательные функции
+# --------------------------------------------------------------------------- #
+
+def run(cmd, cwd=None, timeout=60):
+    """Запускает команду, возвращает (код, stdout, stderr)."""
     try:
         p = subprocess.run(
-            cmd,
+            [str(c) for c in cmd],
             cwd=str(cwd or ROOT),
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
-            env=e,
         )
         return p.returncode, p.stdout.strip(), p.stderr.strip()
     except FileNotFoundError:
         return 127, "", f"не найдено: {cmd[0]}"
     except subprocess.TimeoutExpired:
         return 124, "", "превышено время ожидания"
+    except Exception as e:  # noqa: BLE001
+        return 1, "", str(e)
 
 
 def bot_pid() -> int | None:
+    """PID процесса studbot.exe либо None."""
     if sys.platform == "win32":
         code, out, _ = run(
             ["tasklist", "/FI", "IMAGENAME eq studbot.exe", "/NH", "/FO", "CSV"],
@@ -97,7 +102,7 @@ def bot_pid() -> int | None:
         )
         if code == 0:
             for line in out.splitlines():
-                parts = [p.strip('" ') for p in line.split('","')]
+                parts = [p.strip().strip('"') for p in line.split(",")]
                 if len(parts) > 1 and parts[0].lower() == "studbot.exe":
                     try:
                         return int(parts[1])
@@ -113,52 +118,30 @@ def bot_pid() -> int | None:
     return None
 
 
-def kill_bot() -> tuple[bool, str]:
-    if sys.platform == "win32":
-        code, _, err = run(["taskkill", "/F", "/IM", "studbot.exe"], timeout=20)
-        if code == 0:
-            return True, "процесс остановлен"
-        return False, err or "не удалось остановить"
-    pid = bot_pid()
-    if not pid:
-        return True, "процесс не запущен"
-    import signal
+def port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.8) -> bool:
+    import socket
 
-    os.kill(pid, signal.SIGTERM)
-    return True, "процесс остановлен"
-
-
-def telegram_ok(timeout: int = 6) -> tuple[bool, str]:
-    """Проверяет доступность Telegram через системный прокси."""
-    proxy = read_proxy()
-    if proxy:
-        code, out, _ = run(
-            ["curl", "-s", "-o", "NUL", "-w", "%{http_code}",
-             "--proxy", proxy, "--max-time", str(timeout), TELEGRAM_URL],
-            timeout=timeout + 5,
-        )
-        if code == 0 and out.startswith(("200", "302", "401")):
-            return True, f"доступен через прокси {proxy}"
-    code, out, _ = run(
-        ["curl", "-s", "-o", "NUL", "-w", "%{http_code}",
-         "--noproxy", "*", "--max-time", str(timeout), TELEGRAM_URL],
-        timeout=timeout + 5,
-    )
-    if code == 0 and out.startswith(("200", "302", "401")):
-        return True, "доступен напрямую"
-    return False, "недоступен — проверь VPN"
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            return s.connect_ex((host, port)) == 0
+    except OSError:
+        return False
 
 
 def read_proxy() -> str | None:
-    """Берёт прокси из .env, иначе из настроек Windows."""
+    """Прокси из .env, иначе из настроек Windows."""
     if ENV_FILE.exists():
-        for line in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if line.startswith("#"):
-                continue
-            if line.upper().startswith("PROXY_URL="):
-                value = line.split("=", 1)[1].strip().strip('"').strip("'")
-                return value or None
+        try:
+            for line in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.upper().startswith("PROXY_URL="):
+                    value = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    return value or None
+        except OSError:
+            pass
     if sys.platform == "win32":
         try:
             import winreg
@@ -167,8 +150,7 @@ def read_proxy() -> str | None:
                 winreg.HKEY_CURRENT_USER,
                 r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
             )
-            enable = winreg.QueryValueEx(key, "ProxyEnable")[0]
-            if enable == 1:
+            if winreg.QueryValueEx(key, "ProxyEnable")[0] == 1:
                 server = winreg.QueryValueEx(key, "ProxyServer")[0]
                 if "=" in server:
                     for part in server.split(";"):
@@ -177,73 +159,268 @@ def read_proxy() -> str | None:
                             return "http://" + v
                 elif server:
                     return "http://" + server
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
     return None
 
 
-def port_open(port: int, host: str = "127.0.0.1") -> bool:
-    import socket
+def file_has_secret(path: Path) -> bool:
+    """Проверяет текстовый файл на типичные секреты."""
+    if path.name in SECRET_FREE_FILES or path.suffix.lower() in {
+        ".pdf", ".xlsx", ".png", ".jpg", ".jpeg", ".gif", ".exe", ".db", ".zip",
+    }:
+        return False
+    if not path.is_file():
+        return False
+    try:
+        if path.stat().st_size > 3_000_000:
+            return False
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return any(p.search(text) for p in SECRET_PATTERNS)
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(1.0)
-        return s.connect_ex((host, port)) == 0
+
+# --------------------------------------------------------------------------- #
+#  Логирование
+# --------------------------------------------------------------------------- #
+
+class AppLogger:
+    """Пишет в data/logs/manager.log и отдаёт строки в очередь интерфейса."""
+
+    def __init__(self, ui_queue: queue.Queue):
+        self.q = ui_queue
+        self._lock = threading.Lock()
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            LOG_FILE.touch(exist_ok=True)
+        except OSError:
+            pass
+
+    def write(self, text: str, tag: str = "", to_ui: bool = True):
+        stamp = datetime.now().strftime("%H:%M:%S")
+        line = f"{stamp} {text}"
+        with self._lock:
+            try:
+                with LOG_FILE.open("a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except OSError:
+                pass
+        if to_ui:
+            self.q.put((line, tag))
+
+    def tail(self, count: int = 200) -> list[str]:
+        try:
+            lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+            return lines[-count:]
+        except OSError:
+            return []
+
+    def rotate_if_big(self, limit: int = 2_000_000):
+        """Не даёт логу расти бесконечно."""
+        try:
+            if LOG_FILE.exists() and LOG_FILE.stat().st_size > limit:
+                backup = LOG_DIR / "manager.prev.log"
+                if backup.exists():
+                    backup.unlink()
+                LOG_FILE.replace(backup)
+                LOG_FILE.touch()
+                self.write("лог переполнен — предыдущий сохранён как manager.prev.log", "warn")
+        except OSError:
+            pass
 
 
-class LogWatcher:
-    """Читает файл лога и отдаёт новые строки через очередь."""
+class BotLogWatcher(threading.Thread):
+    """Следит за bot.log и отдаёт новые строки в очередь."""
 
-    def __init__(self):
-        self.q: queue.Queue[str] = queue.Queue()
+    def __init__(self, out: queue.Queue):
+        super().__init__(daemon=True)
+        self.out = out
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._started = False
-
-    def start(self):
-        if not self._started:
-            self._started = True
-            self._thread.start()
 
     def stop(self):
         self._stop.set()
 
-    def _loop(self):
+    def run(self):
         pos = 0
         while not self._stop.is_set():
-            if LOG_FILE.exists():
-                try:
-                    size = LOG_FILE.stat().st_size
+            try:
+                if BOT_LOG.exists():
+                    size = BOT_LOG.stat().st_size
                     if size < pos:
                         pos = 0
-                    with LOG_FILE.open("r", encoding="utf-8", errors="replace") as f:
+                    with BOT_LOG.open("r", encoding="utf-8", errors="replace") as f:
                         f.seek(pos)
                         for line in f:
-                            self.q.put(line.rstrip())
+                            self.out.put(line.rstrip())
                         pos = f.tell()
-                except Exception:
-                    pass
-            time.sleep(0.7)
+            except OSError:
+                pass
+            self._stop.wait(0.6)
 
+
+# --------------------------------------------------------------------------- #
+#  Тяжёлые операции (выполняются в фоновом потоке)
+# --------------------------------------------------------------------------- #
+
+def job_telegram() -> tuple[bool, str]:
+    proxy = read_proxy()
+    if proxy and curl_available():
+        code, out, _ = run(
+            ["curl", "-s", "-o", "NUL", "-w", "%{http_code}",
+             "--proxy", proxy, "--max-time", "5", TELEGRAM_URL],
+            timeout=9,
+        )
+        if code == 0 and out[:3] in ("200", "302", "401"):
+            return True, f"через прокси {proxy}"
+    if curl_available():
+        code, out, _ = run(
+            ["curl", "-s", "-o", "NUL", "-w", "%{http_code}",
+             "--noproxy", "*", "--max-time", "5", TELEGRAM_URL],
+            timeout=9,
+        )
+        if code == 0 and out[:3] in ("200", "302", "401"):
+            return True, "напрямую"
+    if proxy:
+        return False, "прокси не отвечает"
+    return False, "нет маршрута, включи VPN"
+
+
+def curl_available() -> bool:
+    if sys.platform == "win32":
+        return shutil.which("curl.exe") is not None or Path(
+            r"C:\Windows\System32\curl.exe"
+        ).exists()
+    return shutil.which("curl") is not None
+
+
+def job_status() -> list[tuple[str, str, str]]:
+    """Возвращает строки состояния."""
+    pid = bot_pid()
+    rows: list[tuple[str, str, str]] = []
+    rows.append((
+        "Процесс",
+        f"работает, PID {pid}" if pid else "остановлен",
+        "ok" if pid else "bad",
+    ))
+    rows.append((
+        "Сборка",
+        "есть" if EXE.exists() else "нет — нажми «Пересобрать»",
+        "ok" if EXE.exists() else "warn",
+    ))
+    proxy = read_proxy()
+    rows.append(("Прокси", proxy or "не задан", "ok" if proxy else "warn"))
+    up = port_open(8080)
+    panel = port_open(8081)
+    rows.append(("Мини-приложение :8080", "отвечает" if up else "молчит",
+                 "ok" if up else "bad"))
+    rows.append(("Админ-панель :8081", "отвечает" if panel else "молчит",
+                 "ok" if panel else "bad"))
+    rows.append((
+        "Журнал бота",
+        "bot.log" if BOT_LOG.exists() else "нет файла",
+        "ok" if BOT_LOG.exists() else "warn",
+    ))
+    return rows
+
+
+def job_git() -> dict:
+    """Собирает всю информацию о git."""
+    if not (ROOT / ".git").exists():
+        return {"ok": False}
+
+    out: dict = {"ok": True}
+
+    code, branch, _ = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout=20)
+    out["branch"] = branch or "?"
+
+    code, remote, _ = run(["git", "config", "--get", "remote.origin.url"], timeout=20)
+    out["remote"] = remote.rstrip("/").removesuffix(".git") if code == 0 else ""
+
+    code, log_out, _ = run(
+        ["git", "log", "--pretty=format:%h|%ad|%s", "--date=format:%d.%m %H:%M", "-25"],
+        timeout=30,
+    )
+    commits = []
+    for line in log_out.splitlines():
+        parts = line.split("|", 2)
+        if len(parts) == 3:
+            commits.append(parts)
+    out["commits"] = commits
+
+    code, status_out, _ = run(["git", "status", "--porcelain"], timeout=30)
+    changes = []
+    secrets = []
+    for line in status_out.splitlines():
+        if len(line) < 4:
+            continue
+        # Формат: XY<пробел>путь — нельзя резать по индексу, путь может
+        # содержать пробелы, а сдвиг индекса съедал первый символ.
+        parts = line.split(maxsplit=1)
+        if len(parts) < 2:
+            continue
+        st = (line[:2].strip() or "?")[0]
+        path = parts[1].strip()
+        tag = {"M": "mod", "A": "add", "R": "mod", "D": "del",
+               "C": "mod", "??": "add", "!": "mod"}.get(st, "mod")
+        if path.rsplit("/", 1)[-1] == ".env":
+            secrets.append(path)
+            changes.append((st, path, "secret"))
+            continue
+        if file_has_secret(ROOT / path):
+            secrets.append(path)
+            changes.append((st, path, "secret"))
+            continue
+        changes.append((st, path, tag))
+    out["changes"] = changes
+    out["secrets"] = secrets
+
+    code, counts, _ = run(
+        ["git", "rev-list", "--left-right", "--count", "@{upstream}...HEAD"], timeout=25
+    )
+    if code == 0 and counts:
+        bits = counts.split()
+        if len(bits) == 2:
+            out["ahead"], out["behind"] = bits
+    return out
+
+
+# --------------------------------------------------------------------------- #
+#  Интерфейс
+# --------------------------------------------------------------------------- #
 
 class Manager(tk.Tk):
+    POLL_MS = 120
+
     def __init__(self):
         super().__init__()
-        self.title(APP_TITLE)
-        self.geometry("1080x720")
-        self.minsize(900, 600)
+        self.title(f"{APP_TITLE} {APP_VERSION}")
+        self.geometry("1100x740")
+        self.minsize(920, 620)
         self.configure(bg=BG)
 
+        self.log_q: queue.Queue = queue.Queue()
+        self.job_q: queue.Queue = queue.Queue()
+        self.res_q: queue.Queue = queue.Queue()
+
+        self.logger = AppLogger(self.log_q)
+        self.logger.rotate_if_big()
+
         self.proc = None
-        self.log_queue: queue.Queue[str] = queue.Queue()
-        self._last_status = 0.0
+        self.proc_started = 0.0
+        self.pending_secrets: list[str] = []
+        self._status_due = 0.0
+        self._git_due = 0.0
         self._closing = False
 
         self._setup_style()
         self._build_ui()
-        self._start_log_watchers()
 
-        self.after(300, self._drain_log)
-        self.after(500, self._tick)
+        threading.Thread(target=self._worker, daemon=True).start()
+        BotLogWatcher(self.log_q).start()
+
+        self.after(self.POLL_MS, self._pump)
+        self.after(300, self._boot)
 
     # ---------- оформление ----------
 
@@ -260,9 +437,6 @@ class Manager(tk.Tk):
         s.configure("CardMuted.TLabel", background=CARD, foreground=MUTED, font=("Segoe UI", 9))
         s.configure("CardTitle.TLabel", background=CARD, foreground=TEXT,
                     font=("Segoe UI", 12, "bold"))
-        s.configure("Card.TLabelframe", background=CARD, bordercolor=LINE)
-        s.configure("Card.TLabelframe.Label", background=CARD, foreground=MUTED,
-                    font=("Segoe UI", 9))
 
         s.configure("TNotebook", background=BG, bordercolor=LINE, tabmargins=(0, 6, 0, 0))
         s.configure("TNotebook.Tab", background=CARD2, foreground=MUTED,
@@ -273,8 +447,7 @@ class Manager(tk.Tk):
 
         s.configure("Accent.TButton", background=ACCENT, foreground="#ffffff",
                     font=("Segoe UI", 10, "bold"), padding=(16, 10), borderwidth=0)
-        s.map("Accent.TButton",
-              background=[("active", "#3b7ae8"), ("disabled", "#33465e")])
+        s.map("Accent.TButton", background=[("active", "#3b7ae8"), ("disabled", "#33465e")])
         s.configure("Ghost.TButton", background=CARD2, foreground=TEXT,
                     font=("Segoe UI", 10), padding=(14, 9), bordercolor=LINE)
         s.map("Ghost.TButton", background=[("active", "#2a3749")])
@@ -285,10 +458,6 @@ class Manager(tk.Tk):
                     font=("Segoe UI", 10, "bold"), padding=(14, 9), borderwidth=0)
         s.map("Green.TButton", background=[("active", "#26b869")])
 
-        s.configure("TEntry", fieldbackground=CARD2, background=CARD2, foreground=TEXT,
-                    bordercolor=LINE, insertcolor=TEXT, padding=(10, 8))
-        s.configure("TText", fieldbackground=CARD2, background=CARD2, foreground=TEXT,
-                    insertcolor=TEXT, bordercolor=LINE, padx=8, pady=8)
         s.configure("Treeview", background=CARD2, fieldbackground=CARD2, foreground=TEXT,
                     bordercolor=LINE, rowheight=26, font=("Segoe UI", 9))
         s.configure("Treeview.Heading", background=CARD, foreground=MUTED,
@@ -307,22 +476,15 @@ class Manager(tk.Tk):
         return box
 
     def _build_ui(self):
-        # верхняя панель
         top = ttk.Frame(self, padding=(14, 12))
         top.pack(fill="x")
-        ttk.Label(top, text="🤖  StudBot", font=("Segoe UI", 17, "bold")).pack(side="left")
-        self.lbl_badge = tk.Label(
-            top, text="● проверка…", bg=CARD, fg=YELLOW,
-            font=("Segoe UI", 10, "bold"), padx=14, pady=7,
-        )
+        ttk.Label(top, text="\U0001F916  StudBot", font=("Segoe UI", 17, "bold")).pack(side="left")
+        self.lbl_badge = tk.Label(top, text="● проверка…", bg=CARD, fg=YELLOW,
+                                  font=("Segoe UI", 10, "bold"), padx=14, pady=7)
         self.lbl_badge.pack(side="left", padx=(16, 0))
+        self.lbl_right = tk.Label(top, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9))
+        self.lbl_right.pack(side="right")
 
-        self.lbl_uptime = tk.Label(
-            top, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9)
-        )
-        self.lbl_uptime.pack(side="right")
-
-        # вкладки
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=14, pady=(0, 14))
         self.tab_main = ttk.Frame(self.nb, padding=(4, 10, 4, 4))
@@ -340,7 +502,7 @@ class Manager(tk.Tk):
         left = ttk.Frame(self.tab_main)
         left.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
-        controls = self._card(left, "Управление ботом", "запуск, остановка и пересборка")
+        controls = self._card(left, "Управление ботом", "запуск, остановка, пересборка")
         row = ttk.Frame(controls, style="Card.TFrame")
         row.pack(fill="x")
         self.btn_start = ttk.Button(row, text="▶  Запустить", style="Green.TButton",
@@ -356,51 +518,49 @@ class Manager(tk.Tk):
 
         row2 = ttk.Frame(controls, style="Card.TFrame")
         row2.pack(fill="x", pady=(12, 0))
-        ttk.Button(row2, text="🌐  Открыть админ-панель", style="Ghost.TButton",
+        ttk.Button(row2, text="\U0001F310  Админ-панель", style="Ghost.TButton",
                    command=lambda: self._open_url("http://127.0.0.1:8081")).pack(side="left", padx=(0, 8))
-        ttk.Button(row2, text="📱  Открыть мини-приложение", style="Ghost.TButton",
+        ttk.Button(row2, text="\U0001F4F1  Мини-приложение", style="Ghost.TButton",
                    command=lambda: self._open_url("http://localhost:8080")).pack(side="left")
 
-        status = self._card(left, "Состояние", "проверяется автоматически каждые 5 секунд")
+        status = self._card(left, "Состояние", "обновляется каждые 5 секунд")
         self.status_tree = ttk.Treeview(
             status, columns=("param", "value"), show="headings", height=7
         )
         self.status_tree.heading("param", text="Параметр")
         self.status_tree.heading("value", text="Значение")
-        self.status_tree.column("param", width=210, anchor="w")
-        self.status_tree.column("value", width=380, anchor="w")
+        self.status_tree.column("param", width=200, anchor="w")
+        self.status_tree.column("value", width=400, anchor="w")
         self.status_tree.pack(fill="x")
-        self.status_tree.tag_configure("ok", foreground=GREEN)
-        self.status_tree.tag_configure("bad", foreground=RED)
-        self.status_tree.tag_configure("warn", foreground=YELLOW)
+        for name, tag, color in (("ok", "ok", GREEN), ("bad", "bad", RED), ("warn", "warn", YELLOW)):
+            self.status_tree.tag_configure(name, foreground=color)
 
-        logs = self._card(left, "Журнал", "bot.log — обновляется в реальном времени")
+        logs = self._card(left, "Журнал",
+                          "bot.log — события бота; действия менеджера пишутся в data/logs")
         wrap = ttk.Frame(logs, style="Card.TFrame")
         wrap.pack(fill="both", expand=True)
         self.log_text = tk.Text(
-            wrap, height=12, bg=CARD2, fg="#c9d6e5", insertbackground=TEXT,
-            relief="flat", font=("Consolas", 9), wrap="none",
+            wrap, height=14, bg=CARD2, fg="#c9d6e5", insertbackground=TEXT,
+            relief="flat", font=("Consolas", 9), wrap="none", state="disabled",
         )
         sb = ttk.Scrollbar(wrap, orient="vertical", command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=sb.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        self.log_text.tag_configure("err", foreground=RED)
-        self.log_text.tag_configure("warn", foreground=YELLOW)
-        self.log_text.tag_configure("ok", foreground=GREEN)
+        for name, color in (("err", RED), ("warn", YELLOW), ("ok", GREEN), ("mgr", ACCENT)):
+            self.log_text.tag_configure(name, foreground=color)
 
     def _build_git(self):
         head = self._card(self.tab_git, "Git", "изменения, коммиты и отправка на GitHub")
         row = ttk.Frame(head, style="Card.TFrame")
         row.pack(fill="x")
-        self.lbl_git_branch = tk.Label(row, text="", bg=CARD, fg=ACCENT,
+        self.lbl_git_branch = tk.Label(row, text="загрузка…", bg=CARD, fg=ACCENT,
                                        font=("Segoe UI", 10, "bold"))
         self.lbl_git_branch.pack(side="left", padx=(0, 16))
-        self.lbl_git_sync = tk.Label(row, text="", bg=CARD, fg=MUTED,
-                                     font=("Segoe UI", 9))
+        self.lbl_git_sync = tk.Label(row, text="", bg=CARD, fg=MUTED, font=("Segoe UI", 9))
         self.lbl_git_sync.pack(side="left")
         ttk.Button(row, text="⟳  Обновить", style="Ghost.TButton",
-                   command=self.refresh_git).pack(side="right")
+                   command=lambda: self._submit(job_git, self._apply_git)).pack(side="right")
 
         mid = ttk.Frame(self.tab_git)
         mid.pack(fill="both", expand=True, pady=(10, 0))
@@ -408,19 +568,19 @@ class Manager(tk.Tk):
         left = ttk.Frame(mid)
         left.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
-        changes = self._card(left, "Изменённые файлы", "будут добавлены в коммит")
+        changes = self._card(left, "Изменённые файлы", "добавятся в коммит")
         self.changes_tree = ttk.Treeview(
-            changes, columns=("st", "path"), show="headings", height=9
+            changes, columns=("st", "path"), show="headings", height=8
         )
         self.changes_tree.heading("st", text="")
         self.changes_tree.heading("path", text="Файл")
         self.changes_tree.column("st", width=34, anchor="center")
-        self.changes_tree.column("path", width=460, anchor="w")
+        self.changes_tree.column("path", width=440, anchor="w")
         self.changes_tree.pack(fill="both", expand=True)
         self.changes_tree.tag_configure("add", foreground=GREEN)
         self.changes_tree.tag_configure("mod", foreground=YELLOW)
         self.changes_tree.tag_configure("del", foreground=RED)
-        self.changes_tree.tag_configure("secret", foreground=RED, background="#3a1c1f")
+        self.changes_tree.tag_configure("secret", foreground="#ffffff", background="#8e2a2f")
 
         commit = self._card(left, "Новый коммит", "кратко опиши, что изменилось")
         self.msg_text = tk.Text(
@@ -428,251 +588,331 @@ class Manager(tk.Tk):
             relief="flat", font=("Segoe UI", 10), wrap="word", padx=10, pady=8,
         )
         self.msg_text.pack(fill="x")
-        self.msg_text.insert("1.0", "")
-        self.msg_text.focus_set()
 
         brow = ttk.Frame(commit, style="Card.TFrame")
         brow.pack(fill="x", pady=(10, 0))
-        self.btn_commit = ttk.Button(brow, text="💾  Только коммит", style="Ghost.TButton",
+        self.btn_commit = ttk.Button(brow, text="\U0001F4BE  Только коммит",
+                                     style="Ghost.TButton",
                                      command=lambda: self.do_commit(push=False))
         self.btn_commit.pack(side="left", padx=(0, 8))
-        self.btn_commit_push = ttk.Button(brow, text="🚀  Коммит и отправить",
+        self.btn_commit_push = ttk.Button(brow, text="\U0001F680  Коммит и отправить",
                                            style="Accent.TButton",
                                            command=lambda: self.do_commit(push=True))
         self.btn_commit_push.pack(side="left")
 
         right = ttk.Frame(mid)
         right.pack(side="right", fill="both", expand=True)
-
-        hist = self._card(right, "История", "последние коммиты")
+        hist = self._card(right, "История", "последние 25 коммитов")
         self.log_tree = ttk.Treeview(
-            hist, columns=("sha", "date", "msg"), show="headings", height=20
+            hist, columns=("sha", "date", "msg"), show="headings", height=22
         )
         self.log_tree.heading("sha", text="Хэш")
         self.log_tree.heading("date", text="Когда")
         self.log_tree.heading("msg", text="Сообщение")
-        self.log_tree.column("sha", width=70, anchor="w")
-        self.log_tree.column("date", width=120, anchor="w")
-        self.log_tree.column("msg", width=250, anchor="w")
+        self.log_tree.column("sha", width=66, anchor="w")
+        self.log_tree.column("date", width=112, anchor="w")
+        self.log_tree.column("msg", width=240, anchor="w")
         self.log_tree.pack(fill="both", expand=True)
 
     def _build_tools(self):
         card = self._card(self.tab_tools, "Инструменты", "быстрые действия")
-
         items = [
-            ("📊  Скачать таблицу посещаемости", "Открыть папку с файлами Excel", self.open_exports),
-            ("📚  Загрузить книгу в библиотеку", "Выбрать PDF или документ", self.upload_book),
-            ("🔑  Показать пароль админ-панели", "Прочитать из .env", self.show_password),
-            ("📄  Открыть папку проекта", "Файлы и база данных", lambda: self._open_path(ROOT)),
-            ("📁  Открыть папку data", "База, загрузки, выгрузки", lambda: self._open_path(ROOT / "data")),
-            ("🧹  Очистить логи", "Удалить bot.log", self.clear_logs),
+            ("\U0001F4CA  Выгрузки Excel", "папка с таблицами посещаемости", self.open_exports),
+            ("\U0001F4DA  Загрузить книгу", "выбрать файл и открыть панель", self.upload_book),
+            ("\U0001F511  Показать пароль панели", "прочитать ADMIN_PASSWORD", self.show_password),
+            ("\U0001F5C2  Папка проекта", "файлы и база данных", lambda: self._open_path(ROOT)),
+            ("\U0001F4C1  Папка data", "база, загрузки, логи", lambda: self._open_path(ROOT / "data")),
+            ("\U0001F5D3  Открыть свой лог", "data/logs/manager.log", self.open_log_dir),
+            ("\U0001F9F9  Очистить логи", "удалить bot.log и manager.log", self.clear_logs),
         ]
         for title, sub, cmd in items:
             row = ttk.Frame(card, style="Card.TFrame")
             row.pack(fill="x", pady=(0, 8))
             ttk.Label(row, text=title, style="CardTitle.TLabel").pack(side="left")
-            ttk.Button(row, text="Открыть", style="Ghost.TButton",
-                       command=cmd).pack(side="right")
+            ttk.Button(row, text="Открыть", style="Ghost.TButton", command=cmd).pack(side="right")
             ttk.Label(row, text=sub, style="CardMuted.TLabel").pack(side="left", padx=(14, 0))
 
         info = self._card(self.tab_tools, "О проекте")
         ttk.Label(
             info,
             text=(
-                "StudBot — Telegram-бот для староста группы.\n"
-                "Библиотека с файлами, домашние задания по предметам,\n"
-                "перекличка через голосование с выгрузкой в Excel по неделям,\n"
-                "опросы, события, роли, мини-приложение и админ-панель."
+                f"StudBot Manager {APP_VERSION}\n\n"
+                "Telegram-бот для староста группы: библиотека с файлами,\n"
+                "домашка по предметам, перекличка через голосование с\n"
+                "выгрузкой в Excel по неделям, опросы, события, роли,\n"
+                "мини-приложение и админ-панель."
             ),
             style="CardMuted.TLabel", justify="left",
         ).pack(anchor="w")
 
         btns = ttk.Frame(self.tab_tools, style="Card.TFrame")
         btns.pack(fill="x", pady=(4, 0))
-        ttk.Button(btns, text="🐙  Открыть репозиторий на GitHub", style="Ghost.TButton",
-                   command=lambda: self._open_url("https://github.com/pchelenokk/studbot-tg")).pack(anchor="w")
+        ttk.Button(
+            btns, text="\U0001F419  Репозиторий на GitHub", style="Ghost.TButton",
+            command=lambda: self._open_url("https://github.com/pchelenokk/studbot-tg"),
+        ).pack(anchor="w")
 
-    # ---------- логи ----------
+    # ---------- фоновая обработка ----------
 
-    def _start_log_watchers(self):
-        if LOG_FILE.exists():
-            try:
-                data = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()[-300:]
-                for line in data:
-                    self._append_log(line)
-            except Exception:
-                pass
-        self.msg_queue_pump()
+    def _submit(self, func, callback, *args):
+        """Кладёт задачу в фоновый поток, результат вернётся в UI-поток."""
+        self.job_q.put((func, args, callback))
 
-    def msg_queue_pump(self):
-        threading.Thread(target=self._log_thread, daemon=True).start()
-
-    def _log_thread(self):
-        watcher = LogWatcher()
-        watcher.start()
+    def _worker(self):
         while not self._closing:
             try:
-                line = watcher.q.get(timeout=0.5)
-                self.log_queue.put(line)
+                func, args, callback = self.job_q.get(timeout=0.3)
             except queue.Empty:
-                pass
+                continue
+            try:
+                result = func(*args)
+                self.res_q.put((callback, result, None))
+            except Exception as e:  # noqa: BLE001
+                self.res_q.put((callback, None, str(e)))
 
-    def _drain_log(self):
+    def _pump(self):
+        """Разбирает очереди в UI-потоке и планирует периодические задачи."""
+        # логи
         while True:
             try:
-                line = self.log_queue.get_nowait()
-                self._append_log(line)
+                line, tag = self.log_q.get_nowait()
             except queue.Empty:
                 break
-        self.after(300, self._drain_log)
+            self._append_log(line, tag)
 
-    def _append_log(self, line: str):
-        tag = None
-        low = line.lower()
-        if "error" in low or "offline" in low or "failed" in low or "panic" in low:
-            tag = "err"
-        elif "warn" in low or "retrying" in low:
-            tag = "warn"
-        elif "online" in low or "started" in low or "запущен" in low:
-            tag = "ok"
+        # результаты фоновых задач
+        while True:
+            try:
+                callback, result, err = self.res_q.get_nowait()
+            except queue.Empty:
+                break
+            if err:
+                self.logger.write(f"ошибка фоновой задачи: {err}", "err")
+                continue
+            if callback:
+                callback(result)
+
+        # периодика
+        now = time.monotonic()
+        if now >= self._status_due:
+            self._status_due = now + 5
+            self._submit(self._status_bundle, self._apply_status)
+            self._set_running_ui(bot_pid() is not None)
+
+        if self.nb.index("current") == 1 and now >= self._git_due:
+            self._git_due = now + 5
+            self._submit(job_git, self._apply_git)
+
+        if self.after_id:
+            try:
+                self.after_cancel(self.after_id)
+            except tk.TclError:
+                pass
+        self.after_id = self.after(self.POLL_MS, self._pump)
+
+    after_id = None
+
+    def _status_bundle(self) -> dict:
+        rows = job_status()
+        rows.append(("Telegram",) + job_telegram())
+        return {"rows": rows, "pid": bot_pid()}
+
+    def _apply_status(self, data):
+        pid = data.get("pid")
+        rows = data.get("rows", [])
+        self._set_running_ui(pid is not None)
+
+        self.status_tree.delete(*self.status_tree.get_children())
+        for name, value, tag in rows:
+            self.status_tree.insert("", "end", values=(name, value), tags=(tag,))
+
+        if pid and self.proc_started:
+            self.lbl_right.configure(text=f"работает {int(time.time() - self.proc_started)} с")
+        elif not EXE.exists():
+            self.lbl_right.configure(text="сборка не найдена")
+
+        # В журнал пишем только когда состояние реально изменилось
+        snapshot = {name: value for name, value, _ in rows}
+        if snapshot != self._last_status_snapshot:
+            if self._last_status_snapshot:
+                for name, value, tag in rows:
+                    was = self._last_status_snapshot.get(name)
+                    if was and was != value:
+                        level = "ok" if tag == "ok" else ("err" if tag == "bad" else "warn")
+                        self.logger.write(f"{name}: {was} â†’ {value}", level)
+            self._last_status_snapshot = snapshot
+
+    _last_status_snapshot: dict = {}
+
+    def _set_running_ui(self, running: bool):
+        self.btn_start.configure(state="disabled" if running else "normal")
+        self.btn_stop.configure(state="normal" if running else "disabled")
+        if running:
+            if self.lbl_badge.cget("fg") != GREEN:
+                self.lbl_badge.configure(text="● работает", fg=GREEN)
+        elif self.lbl_badge.cget("fg") != RED:
+            self.lbl_badge.configure(text="● остановлен", fg=RED)
+
+    def _boot(self):
+        self.logger.write(f"менеджер запущен (v{APP_VERSION})", "mgr")
+        self.logger.write(f"лог пишется в {LOG_FILE}", "mgr")
+        for line in self.logger.tail(60):
+            self.log_q.put((line, ""))
+        if BOT_LOG.exists():
+            try:
+                tail = BOT_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
+                for line in tail:
+                    self.log_q.put((line, ""))
+            except OSError:
+                pass
+        self._submit(job_git, self._apply_git)
+        self._git_due = time.monotonic() + 5
+
+    # ---------- журнал ----------
+
+    def _append_log(self, line: str, tag: str = ""):
+        if not tag:
+            low = line.lower()
+            if "error" in low or "offline" in low or "failed" in low or "panic" in low:
+                tag = "err"
+            elif "warn" in low or "retrying" in low:
+                tag = "warn"
+            elif "online" in low or "started" in low or "запущен" in low:
+                tag = "ok"
+            elif "менеджер" in low or "[менеджер]" in low:
+                tag = "mgr"
+        self.log_text.configure(state="normal")
         self.log_text.insert("end", line + "\n", tag)
-        if int(self.log_text.index("end-1c").split(".")[0]) > 1200:
-            self.log_text.delete("1.0", "300.0")
+        lines = int(self.log_text.index("end-1c").split(".")[0])
+        if lines > 1500:
+            self.log_text.delete("1.0", "400.0")
         self.log_text.see("end")
+        self.log_text.configure(state="disabled")
 
-    # ---------- управление ботом ----------
+    # ---------- бот ----------
 
     def start_bot(self):
         if bot_pid():
-            self._say("Бот уже запущен")
+            self.logger.write("бот уже запущен", "warn")
             return
         if not EXE.exists():
             if not messagebox.askyesno("Нет сборки",
                                        "studbot.exe не найден. Собрать сейчас?"):
                 return
-            if not self._build():
-                return
-        flags = 0
-        if sys.platform == "win32":
-            flags = 0x08000000  # CREATE_NO_WINDOW
+            self._submit(lambda: self._build_sync(), self._after_build_start)
+            return
         try:
+            flags = 0x08000000 if sys.platform == "win32" else 0
             self.proc = subprocess.Popen(
                 [str(EXE)], cwd=str(ROOT),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=flags,
             )
-            self._say("Бот запускается…")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось запустить:\n{e}")
+            self.proc_started = time.time()
+            self.logger.write("бот запускается", "ok")
+        except Exception as e:  # noqa: BLE001
+            self.logger.write(f"не удалось запустить: {e}", "err")
 
     def stop_bot(self):
-        ok, msg = kill_bot()
-        if ok:
-            self.proc = None
-            self._say("Бот остановлен")
+        if sys.platform == "win32":
+            code, _, err = run(["taskkill", "/F", "/IM", "studbot.exe"], timeout=20)
+            ok = code == 0
         else:
-            messagebox.showwarning("Не удалось", msg)
+            pid = bot_pid()
+            ok = True
+            if pid:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError as e:
+                    ok = False
+                    err = str(e)
+        self.logger.write("бот остановлен" if ok else f"не удалось остановить: {err}",
+                          "ok" if ok else "err")
+        self.proc = None
+        self.proc_started = 0.0
 
     def restart_bot(self):
         self.stop_bot()
-        time.sleep(1.2)
-        self.start_bot()
+        self.after(1200, self.start_bot)
 
-    def rebuild_bot(self) -> bool:
+    def rebuild_bot(self):
         if not messagebox.askyesno("Пересборка",
                                    "Остановить бот и пересобрать studbot.exe?"):
-            return False
+            return
         self.stop_bot()
-        return self._build()
+        self._submit(lambda: self._build_sync(), self._after_build)
 
-    def _build(self) -> bool:
+    def _build_sync(self) -> bool:
         if shutil.which("go") is None:
-            messagebox.showerror("Go не найден",
-                                 "Go не установлен или нет в PATH.\n"
-                                 "Установи с https://go.dev/dl/")
             return False
-        self._say("Сборка…")
-        try:
-            p = subprocess.run(["go", "build", "-o", "studbot.exe", "./cmd/bot"],
-                               cwd=str(ROOT), capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", timeout=300)
-        except subprocess.TimeoutExpired:
-            messagebox.showerror("Сборка", "Превышено время ожидания")
-            return False
-        if p.returncode != 0:
-            messagebox.showerror("Ошибка сборки", p.stderr or p.stdout)
-            self._say("Сборка не удалась")
-            return False
-        self._say("Сборка успешна")
-        return True
+        self.logger.write("запущена сборка…", "mgr")
+        code, _, err = run(["go", "build", "-o", "studbot.exe", "./cmd/bot"], timeout=300)
+        return code == 0
 
-    # ---------- Git ----------
+    def _after_build(self, ok):
+        if ok:
+            self.logger.write("сборка успешна", "ok")
+        else:
+            self.logger.write("сборка не удалась — нужен установленный Go", "err")
+            messagebox.showerror("Сборка",
+                                 "Не удалось собрать. Проверь, что Go установлен и доступен в PATH.")
 
-    def refresh_git(self):
-        if not (ROOT / ".git").exists():
+    def _after_build_start(self, ok):
+        self._after_build(ok)
+        if ok:
+            self.start_bot()
+
+    # ---------- git ----------
+
+    def _apply_git(self, data):
+        if not data.get("ok"):
             self.lbl_git_branch.configure(text="не git-репозиторий", fg=RED)
-            self.changes_tree.delete(*self.changes_tree.get_children())
             return
 
-        code, branch, _ = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout=15)
-        branch = branch or "?"
-        self.lbl_git_branch.configure(text=f"ветка: {branch}", fg=ACCENT)
+        self.lbl_git_branch.configure(text=f"ветка: {data.get('branch', '?')}", fg=ACCENT)
 
-        code, remote, _ = run(["git", "config", "--get", "remote.origin.url"], timeout=15)
-        repo = remote.rstrip("/").removesuffix(".git") if code == 0 else ""
+        sync = "нет данных об upstream"
+        color = MUTED
+        if "ahead" in data:
+            ahead, behind = data.get("ahead", "0"), data.get("behind", "0")
+            if ahead != "0" or behind != "0":
+                sync = f"вперёд {ahead} · назад {behind}"
+                color = YELLOW
+            else:
+                sync = "синхронизировано с GitHub"
+                color = GREEN
+        remote = data.get("remote", "")
+        self.lbl_git_sync.configure(text=f"{sync}  ·  {remote or 'remote не задан'}", fg=color)
 
-        code, log_out, _ = run(
-            ["git", "log", "--pretty=format:%h|%ad|%s", "--date=format:%d.%m %H:%M", "-25"],
-            timeout=25,
-        )
         self.log_tree.delete(*self.log_tree.get_children())
-        for line in log_out.splitlines():
-            parts = line.split("|", 2)
-            if len(parts) == 3:
-                self.log_tree.insert("", "end", values=(parts[0], parts[1], parts[2]))
+        for sha, date, msg in data.get("commits", []):
+            self.log_tree.insert("", "end", values=(sha, date, msg))
 
-        code, status_out, _ = run(["git", "status", "--porcelain"], timeout=25)
         self.changes_tree.delete(*self.changes_tree.get_children())
-        secrets: list[str] = []
-
-        for line in status_out.splitlines():
-            if len(line) < 4:
-                continue
-            st = line[:2].strip() or "?"
-            path = line[3:].strip()
-            tag = {"M": "mod", "A": "add", "R": "mod", "D": "del",
-                   "??": "add", "!": "mod"}.get(st[0], "mod")
-            if path in (".env", ".env.local"):
-                secrets.append(path)
-                self.changes_tree.insert("", "end", values=(st, path), tags=("secret",))
-                continue
-            if _file_has_secret(ROOT / path):
-                secrets.append(path)
-                self.changes_tree.insert("", "end", values=(st, path), tags=("secret",))
-                continue
+        for st, path, tag in data.get("changes", []):
             self.changes_tree.insert("", "end", values=(st, path), tags=(tag,))
 
-        code, counts, _ = run(
-            ["git", "rev-list", "--left-right", "--count", "@{upstream}...HEAD"], timeout=20
-        )
-        sync = ""
-        sync_color = MUTED
-        if code == 0 and counts:
-            bits = counts.split()
-            if len(bits) == 2:
-                behind, ahead = bits
-                if ahead != "0" or behind != "0":
-                    sync = f"вперёд {ahead} · назад {behind}"
-                    sync_color = YELLOW
-                else:
-                    sync = "синхронизировано с GitHub"
-                    sync_color = GREEN
-        if not sync:
-            sync = "нет данных об upstream"
-        self.lbl_git_sync.configure(text=f"{sync}  ·  {repo or 'remote не задан'}", fg=sync_color)
+        self.pending_secrets = data.get("secrets", [])
+        if self.pending_secrets:
+            self.lbl_git_sync.configure(
+                text=f"⚠ секреты в файлах: {len(self.pending_secrets)} — коммит заблокирован",
+                fg=RED,
+            )
+            self.logger.write(
+                f"коммит заблокирован: секреты в {len(self.pending_secrets)} файлах", "err"
+            )
 
-        self.pending_secrets = secrets
+        # Логируем только когда список изменений изменился
+        changes = data.get("changes", [])
+        names = sorted(p for _, p, _ in changes)
+        if names != self._last_changes:
+            if names:
+                self.logger.write(f"изменённых файлов: {len(names)}", "mgr")
+            elif self._last_changes:
+                self.logger.write("рабочая папка чистая", "ok")
+            self._last_changes = names
+
+    _last_changes: list = []
 
     def do_commit(self, push: bool):
         if not (ROOT / ".git").exists():
@@ -684,71 +924,75 @@ class Manager(tk.Tk):
             messagebox.showwarning("Нет сообщения",
                                    "Опиши изменения — это сообщение увидят другие.")
             return
-        if len(message) > 200:
-            message = message[:200]
+        message = message[:200]
 
-        if getattr(self, "pending_secrets", None):
+        if self.pending_secrets:
             messagebox.showerror(
                 "Нельзя закоммитить",
-                "В этих файлах похожи на секреты:\n\n  "
+                "В изменённых файлах похожи на секреты:\n\n  "
                 + "\n  ".join(self.pending_secrets[:10])
-                + "\n\nДобавь их в .gitignore или убери из изменений.",
+                + "\n\nУбери их из изменений или добавь в .gitignore.",
             )
+            self.logger.write(f"коммит заблокирован: секреты в {self.pending_secrets}", "err")
             return
 
-        code, status_out, _ = run(["git", "status", "--porcelain"], timeout=25)
-        if not status_out.strip():
+        self._set_commit_enabled(False)
+        self.logger.write(f"коммит: {message[:70]}", "mgr")
+        self._submit(lambda: self._commit_sync(message, push), self._after_commit)
+
+    def _commit_sync(self, message: str, push: bool) -> dict:
+        code, _, err = run(["git", "add", "-A"], timeout=120)
+        if code != 0:
+            return {"stage": "error", "err": err}
+
+        code, out, err = run(["git", "commit", "-m", message], timeout=120)
+        if code != 0:
+            if "nothing to commit" in (err + out).lower():
+                return {"stage": "empty"}
+            return {"stage": "error", "err": err}
+
+        result = {"stage": "ok"}
+        if push:
+            pcode, pout, perr = run(["git", "push", "origin", "HEAD"], timeout=180)
+            result["pushed"] = pcode == 0
+            if pcode != 0:
+                result["perr"] = perr or pout
+        return result
+
+    def _after_commit(self, result):
+        self._set_commit_enabled(True)
+        stage = result.get("stage")
+
+        if stage == "empty":
+            self.logger.write("изменений не осталось", "warn")
             messagebox.showinfo("Нечего коммитить", "Рабочая папка не изменена.")
             return
+        if stage == "error":
+            self.logger.write(f"ошибка коммита: {result.get('err')}", "err")
+            messagebox.showerror("Ошибка коммита", str(result.get("err"))[:500])
+            return
 
-        self._set_commit_enabled(False)
-        try:
-            code, _, err = run(["git", "add", "-A"], timeout=120)
-            if code != 0:
-                messagebox.showerror("git add", err)
-                return
+        self.msg_text.delete("1.0", "end")
+        self.logger.write("коммит создан", "ok")
 
-            code, _, err = run(["git", "commit", "-m", message], timeout=120)
-            if code != 0:
-                low = (err or "").lower()
-                if "nothing to commit" in low:
-                    self._say("Изменений не осталось")
-                    return
-                messagebox.showerror("git commit", err)
-                return
-
-            self._say(f"Коммит создан: {message[:60]}")
-            self.msg_text.delete("1.0", "end")
-            self.refresh_git()
-
-            if push:
-                self._push()
-        finally:
-            self._set_commit_enabled(True)
-
-    def _push(self) -> None:
-        self._say("Отправка на GitHub…")
-        self._set_commit_enabled(False)
-        code, out, err = run(["git", "push", "origin", "HEAD"], timeout=180)
-        if code == 0:
-            self._say("Отправлено на GitHub")
+        if result.get("pushed"):
+            self.logger.write("отправлено на GitHub", "ok")
             messagebox.showinfo("Готово", "Изменения отправлены на GitHub.")
-        else:
-            text = err or out
-            self._say("Не удалось отправить")
+        elif result.get("pushed") is False:
+            err = str(result.get("perr", ""))
             hint = ""
-            if "could not read Username" in text or "Authentication failed" in text or "terminal prompts" in text:
+            if "could not read Username" in err or "Authentication failed" in err or "terminal prompts" in err:
                 hint = (
-                    "\n\nGit не смог спросить логин и пароль — это обычное дело для "
-                    "приложений без окна ввода.\n\n"
-                    "Открой обычную командную строку и выполни:\n"
-                    "    gh auth login\n"
-                    "или выполни push вручную:\n"
+                    "\n\nGit не смог запросить логин и пароль — для оконных приложений это "
+                    "обычное дело.\n\nОдин раз выполни в обычной командной строке:\n"
+                    "    gh auth login\n\nили отправь вручную:\n"
                     "    git push origin main"
                 )
-            messagebox.showerror("Push не удался", text[:600] + hint)
-        self.refresh_git()
-        self._set_commit_enabled(True)
+            self.logger.write("push не удался", "err")
+            messagebox.showerror("Не отправлено", err[:400] + hint)
+
+        self._submit(job_git, self._apply_git)
+        self._git_due = time.monotonic() + 5
 
     def _set_commit_enabled(self, enabled: bool):
         state = "normal" if enabled else "disabled"
@@ -757,72 +1001,14 @@ class Manager(tk.Tk):
 
     # ---------- прочее ----------
 
-    def _tick(self):
-        now = time.time()
-        if now - self._last_status >= 5:
-            self._last_status = now
-            self._refresh_status()
-            if self.nb.index("current") == 1:
-                self.refresh_git()
-        self.after(1000, self._tick)
-
-    def _refresh_status(self):
-        pid = bot_pid()
-        running = pid is not None
-
-        self.btn_start.configure(state="disabled" if running else "normal")
-        self.btn_stop.configure(state="normal" if running else "disabled")
-
-        if running:
-            self.lbl_badge.configure(text=f"● работает  PID {pid}", fg=GREEN)
-        else:
-            self.lbl_badge.configure(text="● остановлен", fg=RED)
-
-        if EXE.exists():
-            mt = datetime.fromtimestamp(EXE.stat().st_mtime)
-            self.lbl_uptime.configure(text=f"сборка от {mt:%d.%m.%Y %H:%M}")
-        else:
-            self.lbl_uptime.configure(text="сборка не найдена")
-
-        tg_ok, tg_msg = telegram_ok()
-
-        proxy = read_proxy()
-        rows = [
-            ("Процесс", f"работает, PID {pid}" if running else "остановлен",
-             "ok" if running else "bad"),
-            ("Сборка", "есть" if EXE.exists() else "нет — нажми «Пересобрать»",
-             "ok" if EXE.exists() else "warn"),
-            ("Telegram", tg_msg, "ok" if tg_ok else "bad"),
-            ("Прокси", proxy or "не задан", "ok" if proxy else "warn"),
-            ("Мини-приложение", ":8080 отвечает" if port_open(8080) else ":8080 молчит",
-             "ok" if port_open(8080) else "bad"),
-            ("Админ-панель", ":8081 отвечает" if port_open(8081) else ":8081 молчит",
-             "ok" if port_open(8081) else "bad"),
-            ("Журнал", "bot.log" if LOG_FILE.exists() else "нет файла",
-             "ok" if LOG_FILE.exists() else "warn"),
-        ]
-        if self.bot_started_at:
-            self.lbl_uptime.configure(
-                text=f"работает {time.time() - self.bot_started_at:.0f} с"
-            )
-
-        self.status_tree.delete(*self.status_tree.get_children())
-        for name, value, tag in rows:
-            self.status_tree.insert("", "end", values=(name, value), tags=(tag,))
-
-    bot_started_at = 0.0
-
-    def _say(self, text: str):
-        stamp = datetime.now().strftime("%H:%M:%S")
-        self._append_log(f"{stamp} [менеджер] {text}")
-
     def _open_url(self, url: str):
+        self.logger.write(f"открываю {url}", "mgr")
         webbrowser.open(url)
 
     def _open_path(self, path: Path):
         path = Path(path)
         if not path.exists():
-            messagebox.showinfo("Папка не найдена", str(path))
+            messagebox.showinfo("Не найдено", str(path))
             return
         if sys.platform == "win32":
             os.startfile(str(path))  # noqa: S606
@@ -838,6 +1024,7 @@ class Manager(tk.Tk):
         files = sorted(d.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not files:
             messagebox.showinfo("Пока пусто", "Файлов ещё нет.")
+            self._open_path(d)
             return
         self._open_path(d)
         if len(files) == 1 and messagebox.askyesno(
@@ -848,57 +1035,50 @@ class Manager(tk.Tk):
     def upload_book(self):
         path = filedialog.askopenfilename(
             title="Выбери файл книги",
-            filetypes=[
-                ("Документы", "*.pdf *.docx *.doc *.txt *.epub"),
-                ("Все файлы", "*.*"),
-            ],
+            filetypes=[("Документы", "*.pdf *.docx *.doc *.txt *.epub"),
+                       ("Все файлы", "*.*")],
         )
         if not path:
             return
+        self.logger.write(f"выбран файл книги: {Path(path).name}", "mgr")
         self._open_url("http://127.0.0.1:8081")
 
     def show_password(self):
         if not ENV_FILE.exists():
             messagebox.showinfo("Нет файла", ".env не найден")
             return
-        for line in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.strip().upper().startswith("ADMIN_PASSWORD="):
-                value = line.split("=", 1)[1].strip().strip('"').strip("'")
-                messagebox.showinfo("Пароль админ-панели", value or "(пусто)")
-                return
+        try:
+            for line in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.strip().upper().startswith("ADMIN_PASSWORD="):
+                    value = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    messagebox.showinfo("Пароль админ-панели", value or "(пусто)")
+                    return
+        except OSError:
+            pass
         messagebox.showinfo("Пароль", "ADMIN_PASSWORD не задан в .env")
 
+    def open_log_dir(self):
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        self._open_path(LOG_DIR)
+
     def clear_logs(self):
-        if not messagebox.askyesno("Очистить логи", "Удалить bot.log?"):
+        if not messagebox.askyesno("Очистить логи", "Удалить bot.log и manager.log?"):
             return
-        try:
-            if LOG_FILE.exists():
-                LOG_FILE.unlink()
-            self.log_text.delete("1.0", "end")
-            self._say("Логи очищены")
-        except Exception as e:
-            messagebox.showerror("Ошибка", str(e))
+        for f in (BOT_LOG, LOG_FILE, LOG_DIR / "manager.prev.log"):
+            try:
+                if f.exists():
+                    f.unlink()
+            except OSError as e:
+                self.logger.write(f"не удалось удалить {f.name}: {e}", "err")
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
+        self.logger.write("логи очищены", "ok")
 
     def destroy(self):
         self._closing = True
+        self.logger.write("менеджер закрыт", "mgr")
         super().destroy()
-
-
-def _file_has_secret(path: Path) -> bool:
-    """Проверяет текстовый файл на типичные секреты."""
-    if path.name in SECRET_FREE_FILES or path.suffix.lower() in {
-        ".pdf", ".xlsx", ".png", ".jpg", ".jpeg", ".gif", ".exe", ".db", ".zip"
-    }:
-        return False
-    if not path.is_file():
-        return False
-    try:
-        if path.stat().st_size > 3_000_000:
-            return False
-        text = path.read_text(encoding="utf-8", errors="ignore")
-    except Exception:
-        return False
-    return any(pat.search(text) for pat in SECRET_PATTERNS)
 
 
 if __name__ == "__main__":
